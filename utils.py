@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import division
-import matplotlib
-import matplotlib.pyplot as plt
+# import matplotlib
+# import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 import math
-from matplotlib import cm
+# from matplotlib import cm
 
 
 def colorize(value, vmin=None, vmax=None, cmap=None):
@@ -37,6 +37,7 @@ def gray2rgb(im, cmap='gray'):
 def normalize_depth_for_display(depth, pc=95, crop_percent=0, normalizer=None, cmap='gray'):
     # convert to disparity
     depth = 1. / (depth + 1e-6)
+    plt.imshow(depth, cmap="plasma")
     if normalizer is not None:
         depth = depth / normalizer
     else:
@@ -105,11 +106,11 @@ def get_inverse_R(vec):
     rz = tf.slice(vec, [0, 5], [-1, 1])
     rot_mat = euler2mat(rz, ry, rx)
     rot_mat = tf.squeeze(rot_mat, axis=[1]) #[b,3,3]
-    euler = mat2euler(tf.linalg.inv(rot_mat))
+    euler = mat2euler(tf.matrix_inverse(rot_mat))
     euler = euler[:,:,0]
     translation = tf.slice(vec, [0, 0], [-1, 3])
     translation = tf.expand_dims(translation, -1)
-    translation = tf.matmul(tf.linalg.inv(rot_mat), translation)
+    translation = tf.matmul(tf.matrix_inverse(rot_mat), translation)
     translation = tf.squeeze(translation)
     translation *= -1
     pose = tf.concat([translation, euler],axis=1)
@@ -166,12 +167,12 @@ def pose_vec2mat(vec):
 
 def pose_mat(vec):
   batch_size, _ = vec.get_shape().as_list()
-  translation = tf.slice(vec, [0, 0], [-1, 3]) # ��ƽ��ȡ������shape = [B, 3]
+  translation = tf.slice(vec, [0, 0], [-1, 3]) 
   rx = tf.slice(vec, [0, 3], [-1, 1])
   ry = tf.slice(vec, [0, 4], [-1, 1])
   rz = tf.slice(vec, [0, 5], [-1, 1]) # shape = [Batch, 1]
   rot_mat = euler2mat(rz, ry, rx) # shape = [Batch, 1, 3, 3]
-  rot_mat = tf.squeeze(rot_mat, axis=[1]) # shape = [Batch, 3, 3] #��ת����
+  rot_mat = tf.squeeze(rot_mat, axis=[1]) # shape = [Batch, 3, 3] #锟斤拷转锟斤拷锟斤拷
   return translation, rot_mat
 
 def pixel2cam(depth, pixel_coords, intrinsics, is_homogeneous=True):
@@ -196,26 +197,6 @@ def pixel2cam(depth, pixel_coords, intrinsics, is_homogeneous=True):
     return cam_coords
 
 
-def cam2pixel1(cam_coords, proj):
-    """Transforms coordinates in a camera frame to the pixel frame.
-
-    Args:
-      cam_coords: [batch, 4, height, width]
-      proj: [batch, 4, 4]
-    Returns:
-      Pixel coordinates projected from the camera frame [batch, height, width, 2]
-    """
-    batch, _, height, width = cam_coords.get_shape().as_list()
-    cam_coords = tf.reshape(cam_coords, [batch, 4, -1])
-    unnormalized_pixel_coords = tf.matmul(proj, cam_coords)
-    x_u = tf.slice(unnormalized_pixel_coords, [0, 0, 0], [-1, 1, -1])
-    y_u = tf.slice(unnormalized_pixel_coords, [0, 1, 0], [-1, 1, -1])
-    z_u = tf.slice(unnormalized_pixel_coords, [0, 2, 0], [-1, 1, -1])
-    x_n = x_u / (z_u + 1e-10)
-    y_n = y_u / (z_u + 1e-10)
-    pixel_coords = tf.concat([x_n, y_n], axis=1)
-    pixel_coords = tf.reshape(pixel_coords, [batch, 2, height, width])
-    return tf.transpose(pixel_coords, perm=[0, 2, 3, 1])
 
 def cam2pixel(cam_coords, proj):
     """Transforms coordinates in a camera frame to the pixel frame.
@@ -290,21 +271,6 @@ def meshgrid(batch, height, width, is_homogeneous=True):
 
 
 
-def get_point(img, depth, intrinsics):    #ȡ��ƽ������
-    batch, height, width, _ = img.get_shape().as_list()
-    # Construct pixel grid coordinates
-    pixel_coords = meshgrid(batch, height, width)  # (b,3,128,416) ��ά��������\EF\BF?    # Convert pixel coordinates to the camera frame
-    cam_coords = pixel2cam(depth, pixel_coords, intrinsics)  # (b,4,128,416) 4ά������\EF\BF?��1
-    cam_coords = tf.reshape(cam_coords, [batch, 4, -1])
-    x_u = tf.slice(cam_coords, [0, 0, 0], [-1, 1, -1])
-    y_u = tf.slice(cam_coords, [0, 1, 0], [-1, 1, -1])
-    z_u = tf.slice(cam_coords, [0, 2, 0], [-1, 1, -1])
-    x_n = x_u / (z_u + 1e-10)
-    y_n = y_u / (z_u + 1e-10)
-    pixel_coords = tf.concat([x_n, y_n], axis=1)
-    pixel_coords = tf.reshape(pixel_coords, [batch, 2, height, width])
-    return tf.transpose(pixel_coords, perm=[0, 2, 3, 1])
-
 def projective_inverse_warp(img, depth, pose, intrinsics, depth1):
     """Inverse warp a source image to the target image plane based on projection.
 
@@ -320,7 +286,7 @@ def projective_inverse_warp(img, depth, pose, intrinsics, depth1):
     """
     batch, height, width, _ = img.get_shape().as_list()
     # Convert pose vector to matrix
-    pose = pose_vec2mat(pose)
+    
     # Construct pixel grid coordinates
     pixel_coords = meshgrid(batch, height, width)  # (2,3,128,416)
     # Convert pixel coordinates to the camera frame
@@ -334,8 +300,8 @@ def projective_inverse_warp(img, depth, pose, intrinsics, depth1):
     # pixel frame.
     proj_tgt_cam_to_src_pixel = tf.matmul(intrinsics, pose)
     src_pixel_coords = cam2pixel(cam_coords, proj_tgt_cam_to_src_pixel)
-    output_img, output_depth, mask = bilinear_sampler(img, src_pixel_coords, depth1)
-    return output_img, output_depth, mask
+    output_img, mask = bilinear_sampler(img, src_pixel_coords, depth1)
+    return output_img, mask
 
 def projective_inverse_warp_withdepth(img, depth, pose, intrinsics, depth1, nomat = True):
     """Inverse warp a source image to the target image plane based on projection.
@@ -369,6 +335,7 @@ def projective_inverse_warp_withdepth(img, depth, pose, intrinsics, depth1, noma
     src_pixel_coords, computed_depth = cam2pixel_depth(cam_coords, proj_tgt_cam_to_src_pixel)
     output_img, mask = bilinear_sampler(img, src_pixel_coords, depth1)
     output_depth, _, = bilinear_sampler(depth1, src_pixel_coords, depth1)
+    
     return output_img, output_depth, mask, computed_depth
 
 def bilinear_sampler(imgs, coords, depth):
@@ -476,13 +443,13 @@ def bilinear_sampler(imgs, coords, depth):
         return output, mask
 
 
-def get_src_pixel_coords(img, depth, pose, intrinsics, inverse = False):
+def get_src_pixel_coords(img, depth, depth1, pose, intrinsics, pre_coords, inverse = False):
   batch, height, width, _ = img.get_shape().as_list()
   # Convert pose vector to matrix
 
   pose = pose_vec2mat(pose)
   if inverse:
-      pose = tf.linalg.inv(pose)
+      pose = tf.matrix_inverse(pose)
   # Construct pixel grid coordinates
   pixel_coords = meshgrid(batch, height, width)
   # Convert pixel coordinates to the camera frame
@@ -495,7 +462,33 @@ def get_src_pixel_coords(img, depth, pose, intrinsics, inverse = False):
   # Get a 4x4 transformation matrix from 'target' camera frame to 'source'
   # pixel frame.
   proj_tgt_cam_to_src_pixel = tf.matmul(intrinsics, pose)
-  src_pixel_coords = cam2pixel(cam_coords, proj_tgt_cam_to_src_pixel)
+  src_pixel_coords, computed_depth = cam2pixel_depth(cam_coords, proj_tgt_cam_to_src_pixel)
+  output_depth , _ = bilinear_sampler(depth1, pre_coords, depth1)
+  return computed_depth, output_depth
+
+def get_src_pixel_coords_v2(img, depth, depth1, pose, intrinsics, pre_coords, inverse = False):
+  batch, height, width, _ = img.get_shape().as_list()
+  # Convert pose vector to matrix
+
+  pose = pose_vec2mat(pose)
+  if inverse:
+      pose = tf.matrix_inverse(pose)
+  # Construct pixel grid coordinates
+  ones = tf.ones_like(depth1)
+  pixel_coords = tf.concat([pre_coords, ones], axis=-1)
+  pixel_coords = tf.transpose(pixel_coords, perm=[0, 3, 1, 2])
+  # Convert pixel coordinates to the camera frame
+  cam_coords = pixel2cam(depth, pixel_coords, intrinsics)
+  # Construct a 4x4 intrinsic matrix (TODO: can it be 3x4?)
+  filler = tf.constant([0.0, 0.0, 0.0, 1.0], shape=[1, 1, 4])
+  filler = tf.tile(filler, [batch, 1, 1])
+  intrinsics = tf.concat([intrinsics, tf.zeros([batch, 3, 1])], axis=2)
+  intrinsics = tf.concat([intrinsics, filler], axis=1)
+  # Get a 4x4 transformation matrix from 'target' camera frame to 'source'
+  # pixel frame.
+  proj_tgt_cam_to_src_pixel = tf.matmul(intrinsics, pose)
+  src_pixel_coords, computed_depth = cam2pixel_depth(cam_coords, proj_tgt_cam_to_src_pixel)
+  output_depth , _ = bilinear_sampler(depth1, pre_coords, depth1)
   return src_pixel_coords
 
 def get_cloud(depth, intrinsics):
@@ -520,16 +513,32 @@ def camtocloud(cam_coords):
     pixel_coords = tf.reshape(pixel_coords, [batch, 2, height, width])
     return pixel_coords
 
-def transform_cloud(hom_cloud, pose, inverse = True):
+def transform_cloud(hom_cloud, pose, inverse = False):
     batch, _, height, width = hom_cloud.get_shape().as_list()
     pose = pose_vec2mat(pose)
     if inverse:
-        pose = tf.linalg.inv(pose)
+        pose = tf.matrix_inverse(pose)
     hom_cloud = tf.reshape(hom_cloud, [batch, 4, -1])
     transformed_cloud = tf.matmul(pose, hom_cloud)
     transformed_cloud = tf.reshape(transformed_cloud, [batch, -1, height, width])
     return transformed_cloud
 
+
+def transform_cloud_2(hom_cloud, pose, intrinsics, inverse = False):
+    batch, _, height, width = hom_cloud.get_shape().as_list()
+    pose = pose_vec2mat(pose)
+    if inverse:
+        pose = tf.matrix_inverse(pose)
+    filler = tf.constant([0.0, 0.0, 0.0, 1.0], shape=[1, 1, 4])
+    filler = tf.tile(filler, [batch, 1, 1])
+    intrinsics = tf.concat([intrinsics, tf.zeros([batch, 3, 1])], axis=2)
+    intrinsics = tf.concat([intrinsics, filler], axis=1)
+    # Get a 4x4 transformation matrix from 'target' camera frame to 'source'
+    # pixel frame.
+    proj_tgt_cam_to_src_pixel = tf.matmul(intrinsics, pose)
+    src_pixel_coords, _ = cam2pixel_depth(hom_cloud, proj_tgt_cam_to_src_pixel)
+    tgt_pixel_coords, _ = cam2pixel_depth(hom_cloud, intrinsics)
+    return tgt_pixel_coords, src_pixel_coords
 
 def pose_vec2rt(vec):
     """Converts 6DoF parameters to rotation matrix (bs,3,3) and translation vector (bs,3,1)"""
@@ -559,6 +568,14 @@ def skew_symmetric_mat3(vec3):
     vec3_ssm = tf.concat([row1, row2, row3], axis=1)
     return vec3_ssm
 
+def fundamental_matrix_from_rt(vec, intrinsics):
+    rot_mat, translation = pose_vec2rt(vec)
+    translation_ssm = skew_symmetric_mat3(translation)
+    essential_mat = tf.matmul(rot_mat, translation_ssm, name='essential_mat')
+    intrinsics_inv = tf.matrix_inverse(intrinsics)
+    fundamental_mat = tf.matmul(intrinsics_inv, essential_mat, transpose_a=True)
+    fundamental_mat = tf.matmul(fundamental_mat, intrinsics_inv)
+    return fundamental_mat
 
 def essential_mat_from_rt(vec, intrinsics):
     rot_mat, translation = pose_vec2rt(vec)
