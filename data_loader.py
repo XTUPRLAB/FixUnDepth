@@ -38,14 +38,42 @@ class DataLoader(object):
             file_list['em_file_list'],
             seed=seed,
             shuffle=True)
-        match_paths_queue = tf.train.string_input_producer(
-            file_list['match_file_list'],
+        emtr_paths_queue = tf.train.string_input_producer(
+            file_list['emtr_file_list'],
             seed=seed,
             shuffle=True)
-        mask_paths_queue = tf.train.string_input_producer(
-            file_list['mask_file_list'],
+        mp1_paths_queue = tf.train.string_input_producer(
+            file_list['mp1_file_list'],
             seed=seed,
             shuffle=True)
+        mp2_paths_queue = tf.train.string_input_producer(
+            file_list['mp2_file_list'],
+            seed=seed,
+            shuffle=True)
+        mp3_paths_queue = tf.train.string_input_producer(
+           file_list['mp3_file_list'],
+           seed=seed,
+           shuffle=True)
+        mp4_paths_queue = tf.train.string_input_producer(
+           file_list['mp4_file_list'],
+           seed=seed,
+           shuffle=True)
+        mp1tr_paths_queue = tf.train.string_input_producer(
+            file_list['mp1tr_file_list'],
+            seed=seed,
+            shuffle=True)
+        mp2tr_paths_queue = tf.train.string_input_producer(
+            file_list['mp2tr_file_list'],
+            seed=seed,
+            shuffle=True)
+        mp3tr_paths_queue = tf.train.string_input_producer(
+           file_list['mp3tr_file_list'],
+           seed=seed,
+           shuffle=True)
+        mp4tr_paths_queue = tf.train.string_input_producer(
+           file_list['mp4tr_file_list'],
+           seed=seed,
+           shuffle=True)
         self.steps_per_epoch = int(
             len(file_list['image_file_list'])//self.batch_size)
         # Load images
@@ -56,21 +84,6 @@ class DataLoader(object):
             self.unpack_image_sequence(
                 image_seq, self.img_height, self.img_width, self.num_source)
 
-        # Load match
-        match_reader = tf.WholeFileReader()
-        _, match_contents = match_reader.read(match_paths_queue)
-        match_seq = tf.image.decode_jpeg(match_contents)
-        match = \
-            self.unpack_match_sequence(
-                match_seq, self.img_height, self.img_width)
-
-        # Load mask
-        img_reader = tf.WholeFileReader()
-        _, mask_contents = img_reader.read(mask_paths_queue)
-        mask_seq = tf.image.decode_png(mask_contents)
-        mask = \
-            self.unpack_mask_sequence(
-                mask_seq, self.img_height, self.img_width)
 
         # Load camera intrinsics
         cam_reader = tf.TextLineReader()
@@ -84,27 +97,37 @@ class DataLoader(object):
         intrinsics = tf.reshape(raw_cam_vec, [3, 3])
 
         # Load essential matrix
-        em_reader = tf.TextLineReader()
-        _, raw_em_contents = em_reader.read(em_paths_queue)
-        rec_em_def = []
-        for i in range(36):
-            rec_em_def.append([1.])
-        raw_em_vec = tf.decode_csv(raw_em_contents,
-                                    record_defaults=rec_em_def)
-        raw_em_vec = tf.stack(raw_em_vec)
-        essentialmat = tf.reshape(raw_em_vec, [4, 3, 3])
+        essentialmat = self.load_ess_matrix(em_paths_queue)
+        essentialmat_tran = self.load_ess_matrix(emtr_paths_queue)
 
+        num = 50
+        # Load match points
+        
+        match_points1 = self.load_match_points(mp1_paths_queue)
+        match_points2 = self.load_match_points(mp2_paths_queue)
+        match_points3 = self.load_match_points(mp3_paths_queue)
+        match_points4 = self.load_match_points(mp4_paths_queue)
 
+        
+        match_points_stack = tf.concat([match_points1, match_points2, match_points3, match_points4], axis=-1)
+
+        # Load match_trans points
+        match_points1_tran = self.load_match_points(mp1tr_paths_queue)
+        match_points2_tran = self.load_match_points(mp2tr_paths_queue)
+        match_points3_tran = self.load_match_points(mp3tr_paths_queue)
+        match_points4_tran = self.load_match_points(mp4tr_paths_queue)
+        match_points_tran_stack = tf.concat([match_points1_tran, match_points2_tran, match_points3_tran, match_points4_tran], axis=-1)
 
         # Form training batches
-        src_image_stack, tgt_image,src_image_stack1, tgt_image1, intrinsics, match, mask, essentialmat = \
-                tf.train.batch([src_image_stack, tgt_image, src_image_stack1, tgt_image1,intrinsics, match, mask, essentialmat],
+        src_image_stack, tgt_image,src_image_stack1, tgt_image1, intrinsics, essentialmat,  essentialmat_tran, match_points_stack, match_points_tran_stack = \
+                tf.train.batch([src_image_stack, tgt_image, src_image_stack1, tgt_image1,intrinsics, essentialmat,  essentialmat_tran, match_points_stack, match_points_tran_stack],
                                batch_size=self.batch_size)
 
         # Data augmentation
         image_all = tf.concat([tgt_image, src_image_stack, tgt_image1, src_image_stack1], axis=3)
-        image_all, image_all_aug = self.data_augmentation(
-            image_all)
+        image_all_aug = image_all
+        image_all, image_all_aug, match_points_stack, essentialmat, flag = self.data_augmentation(
+            image_all, match_points_stack, match_points_tran_stack, essentialmat, essentialmat_tran)
 
         tgt_image = image_all[:, :, :, :3]
         src_image_stack = image_all[:, :, :, 3:9]
@@ -115,21 +138,37 @@ class DataLoader(object):
         src_image_stack_aug = image_all_aug[:, :, :, 3:9]
         tgt_image_aug1 = image_all_aug[:, :, :, 9:12]
         src_image_stack_aug1 = image_all_aug[:, :, :, 12:]
+        
 
         intrinsics = self.get_multi_scale_intrinsics(
             intrinsics, self.num_scales)
         return  tgt_image, src_image_stack, tgt_image1, src_image_stack1, tgt_image_aug, src_image_stack_aug, \
-                tgt_image_aug1, src_image_stack_aug1, intrinsics, match, mask, essentialmat
+                tgt_image_aug1, src_image_stack_aug1, intrinsics, essentialmat, match_points_stack, flag
 
-    def unpack_mask_sequence(self, mask_seq, img_height, img_width):
-        match21 = mask_seq[:, :img_width, :]
-        match23 = mask_seq[:, img_width: 2 * img_width, :]
-        match32 = mask_seq[:, 2 * img_width:3 * img_width, :]
-        match34 = mask_seq[:, 3 * img_width:4 * img_width, :]
-        mask = tf.concat([match21, match23, match32, match34], axis=-1)
-        mask = tf.cast(mask, tf.float32)
-        mask.set_shape([img_height, img_width, 4])
-        return mask
+    def load_ess_matrix(self, em_paths_queue):
+        em_reader = tf.TextLineReader()
+        _, raw_em_contents = em_reader.read(em_paths_queue)
+        rec_em_def = []
+        for i in range(36):
+            rec_em_def.append([1.])
+        raw_em_vec = tf.decode_csv(raw_em_contents,
+                                    record_defaults=rec_em_def)
+        raw_em_vec = tf.stack(raw_em_vec)
+        essentialmat = tf.reshape(raw_em_vec, [4, 3, 3])
+
+        return essentialmat
+
+    def load_match_points(self,paths_queue, num=50):
+        cam_reader = tf.TextLineReader()
+        _, raw_cam_contents = cam_reader.read(paths_queue)
+        rec_def = []
+        for i in range(num * 4):
+            rec_def.append([1.])
+        raw_cam_vec = tf.decode_csv(raw_cam_contents,
+                                    record_defaults=rec_def)
+        raw_cam_vec = tf.stack(raw_cam_vec)
+        match_points = tf.reshape(raw_cam_vec, [num, 4])
+        return match_points
 
     def unpack_match_sequence(self, match_seq, img_height, img_width):
         match_seq = tf.slice(match_seq, [0, 0, 0], [-1, -1, 2])
@@ -156,15 +195,23 @@ class DataLoader(object):
 
     # add random brightness, contrast, saturation and hue to all source image
     # [H, W, (num_source + 1) * 3]
-    def data_augmentation(self, im):
-        def random_flip(im):
-            def flip_one(sim):
-                do_flip = tf.random_uniform([], 0, 1)
-                return tf.cond(do_flip > 0.5, lambda: tf.image.flip_left_right(sim), lambda: sim)
+    def data_augmentation(self, im, mt, mttran, ess, esstran):
+        def random_flip(im, mt, mttran, ess, esstran):
+            # def flip_one(sim):
+            #     do_flip = tf.random_uniform([], 0, 1)
+            #     return tf.cond(do_flip > 0.5, lambda: tf.image.flip_left_right(sim), lambda: sim)
+            # im = tf.map_fn(lambda sim: flip_one(sim), im)
+            def f1():
+                return im,mt,ess
+            def f2():
+                return tf.image.flip_left_right(im), mttran, esstran
+            # do_flip = tf.random_uniform([], 0, 1)
+            do_flip = tf.Variable(tf.random_uniform([], 0, 1), name='do_flip', trainable=False, dtype=tf.float32)
+            flag = tf.abs(tf.assign(do_flip, tf.random_uniform([], 0, 1)))
 
-            im = tf.map_fn(lambda sim: flip_one(sim), im)
-            # im = tf.cond(do_flip > 0.5, lambda: tf.map_fn(lambda sim: tf.image.flip_left_right(sim),im), lambda : im)
-            return im
+            im, mt, ess = tf.cond(do_flip > 0.5, f2, f1)
+            
+            return im, mt, ess, flag
 
         def augment_image_properties(im):
             # random brightness
@@ -204,9 +251,9 @@ class DataLoader(object):
             # im = tf.cond(do_aug > 0.5, lambda: tf.map_fn(lambda sim: augment_image_properties(sim), im), lambda: im)
             return im
 
-        im = random_flip(im)
+        im, mt, ess, flag = random_flip(im, mt, mttran, ess, esstran)
         im_aug = random_augmentation(im)
-        return im, im_aug
+        return im, im_aug, mt, ess, flag
 
     def format_file_list(self, data_root, split):
         with open(data_root + '/%s.txt' % split, 'r') as f:
@@ -217,18 +264,46 @@ class DataLoader(object):
             frame_ids[i] + '.jpg') for i in range(len(frames))]
         cam_file_list = [os.path.join(data_root, subfolders[i],
             frame_ids[i] + '_cam.txt') for i in range(len(frames))]
+
         em_file_list = [os.path.join(data_root, subfolders[i],
                                       frame_ids[i] + '_em.txt') for i in range(len(frames))]
-        match_file_list = [os.path.join(data_root, subfolders[i],
-                                        frame_ids[i] + '_match.jpg') for i in range(len(frames))]
-        mask_file_list = [os.path.join(data_root, subfolders[i],
-                                       frame_ids[i] + '_mask.png') for i in range(len(frames))]
+
+        emtr_file_list = [os.path.join(data_root, subfolders[i],
+                                      frame_ids[i] + '_em_tran.txt') for i in range(len(frames))]
+
+        mp1_file_list = [os.path.join(data_root, subfolders[i],
+                                      frame_ids[i] + '_match1.txt') for i in range(len(frames))]
+        mp2_file_list = [os.path.join(data_root, subfolders[i],
+                                      frame_ids[i] + '_match2.txt') for i in range(len(frames))]
+        mp3_file_list = [os.path.join(data_root, subfolders[i],
+                                      frame_ids[i] + '_match3.txt') for i in range(len(frames))]
+        mp4_file_list = [os.path.join(data_root, subfolders[i],
+                                      frame_ids[i] + '_match4.txt') for i in range(len(frames))]
+
+        mp1tr_file_list = [os.path.join(data_root, subfolders[i],
+                                      frame_ids[i] + '_match1_real.txt') for i in range(len(frames))]
+        mp2tr_file_list = [os.path.join(data_root, subfolders[i],
+                                      frame_ids[i] + '_match2_real.txt') for i in range(len(frames))]
+        mp3tr_file_list = [os.path.join(data_root, subfolders[i],
+                                      frame_ids[i] + '_match3_real.txt') for i in range(len(frames))]
+        mp4tr_file_list = [os.path.join(data_root, subfolders[i],
+                                      frame_ids[i] + '_match4_real.txt') for i in range(len(frames))]
         all_list = {}
         all_list['image_file_list'] = image_file_list
         all_list['cam_file_list'] = cam_file_list
-        all_list['match_file_list'] = match_file_list
-        all_list['mask_file_list'] = mask_file_list
+
         all_list['em_file_list'] = em_file_list
+        all_list['emtr_file_list'] = emtr_file_list
+
+        all_list['mp1_file_list'] = mp1_file_list
+        all_list['mp2_file_list'] = mp2_file_list
+        all_list['mp3_file_list'] = mp3_file_list
+        all_list['mp4_file_list'] = mp4_file_list
+
+        all_list['mp1tr_file_list'] = mp1tr_file_list
+        all_list['mp2tr_file_list'] = mp2tr_file_list
+        all_list['mp3tr_file_list'] = mp3tr_file_list
+        all_list['mp4tr_file_list'] = mp4tr_file_list
         return all_list
 
     def unpack_image_sequence(self, image_seq, img_height, img_width, num_source):
