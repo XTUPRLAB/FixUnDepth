@@ -281,13 +281,13 @@ class DataLoader(object):
                                       frame_ids[i] + '_match4.txt') for i in range(len(frames))]
 
         mp1tr_file_list = [os.path.join(data_root, subfolders[i],
-                                      frame_ids[i] + '_match1_real.txt') for i in range(len(frames))]
+                                      frame_ids[i] + '_match1_tran.txt') for i in range(len(frames))]
         mp2tr_file_list = [os.path.join(data_root, subfolders[i],
-                                      frame_ids[i] + '_match2_real.txt') for i in range(len(frames))]
+                                      frame_ids[i] + '_match2_tran.txt') for i in range(len(frames))]
         mp3tr_file_list = [os.path.join(data_root, subfolders[i],
-                                      frame_ids[i] + '_match3_real.txt') for i in range(len(frames))]
+                                      frame_ids[i] + '_match3_tran.txt') for i in range(len(frames))]
         mp4tr_file_list = [os.path.join(data_root, subfolders[i],
-                                      frame_ids[i] + '_match4_real.txt') for i in range(len(frames))]
+                                      frame_ids[i] + '_match4_tran.txt') for i in range(len(frames))]
         all_list = {}
         all_list['image_file_list'] = image_file_list
         all_list['cam_file_list'] = cam_file_list
